@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import { readdir, stat, readFile } from 'fs/promises';
@@ -7,7 +8,8 @@ import { createInterface } from 'readline';
 
 const app = express();
 const PORT = process.env.PORT || 18095;
-const AGENTS_DIR = '/root/.openclaw/agents';
+const OPENCLAW_DIR = process.env.OPENCLAW_DIR || '/root/.openclaw';
+const AGENTS_DIR = join(OPENCLAW_DIR, 'agents');
 
 app.use(cors());
 app.use(express.json());
