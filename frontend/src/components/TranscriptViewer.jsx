@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSessionStore } from '../stores/sessionStore';
 import MessageBubble from './MessageBubble';
@@ -27,6 +27,42 @@ function TranscriptViewer() {
     expandAllBlocks,
     collapseAllBlocks,
   } = useSessionStore();
+
+  const scrollRef = useRef(null);
+  const [showScrollButtons, setShowScrollButtons] = useState(false);
+
+  // Auto-scroll to bottom when transcript loads
+  useEffect(() => {
+    if (scrollRef.current && transcript.length > 0) {
+      requestAnimationFrame(() => {
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      });
+    }
+  }, [selectedSession]);
+
+  const handleScroll = useCallback(() => {
+    if (scrollRef.current) {
+      const { scrollHeight, clientHeight } = scrollRef.current;
+      setShowScrollButtons(scrollHeight > clientHeight + 100);
+    }
+  }, []);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) {
+      handleScroll();
+      el.addEventListener('scroll', handleScroll, { passive: true });
+      return () => el.removeEventListener('scroll', handleScroll);
+    }
+  }, [handleScroll, transcript]);
+
+  const scrollToTop = () => {
+    scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const scrollToBottom = () => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+  };
 
   if (!selectedSession) return null;
 
@@ -100,7 +136,7 @@ function TranscriptViewer() {
   const lastMessage = [...transcript].reverse().find(e => e.type === 'message');
 
   return (
-    <div className="h-full flex flex-col bg-bg-primary overflow-hidden">
+    <div className="h-full flex flex-col bg-bg-primary overflow-hidden relative">
       {/* Header */}
       <div className="bg-bg-secondary border-b border-white/5 p-4">
         <div className="flex items-start justify-between mb-3">
@@ -226,7 +262,7 @@ function TranscriptViewer() {
       </div>
 
       {/* Transcript */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3 transcript-scroll">
         {groups.map((group, gIdx) => {
           if (group.type === 'turn') {
             const totalSteps = group.steps.length;
@@ -320,6 +356,30 @@ function TranscriptViewer() {
           </div>
         )}
       </div>
+
+      {/* Scroll buttons */}
+      {showScrollButtons && (
+        <div className="absolute bottom-6 right-8 flex flex-col gap-2 z-10">
+          <button
+            onClick={scrollToTop}
+            className="w-10 h-10 rounded-full bg-bg-tertiary/90 border border-white/10 hover:bg-bg-quaternary hover:border-white/20 text-gray-400 hover:text-white transition-all shadow-lg backdrop-blur-sm flex items-center justify-center"
+            title="Scroll to top"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+            </svg>
+          </button>
+          <button
+            onClick={scrollToBottom}
+            className="w-10 h-10 rounded-full bg-bg-tertiary/90 border border-white/10 hover:bg-bg-quaternary hover:border-white/20 text-gray-400 hover:text-white transition-all shadow-lg backdrop-blur-sm flex items-center justify-center"
+            title="Scroll to bottom"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+        </div>
+      )}
     </div>
   );
 }
