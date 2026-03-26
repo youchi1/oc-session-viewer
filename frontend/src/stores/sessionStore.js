@@ -56,7 +56,10 @@ export const useSessionStore = create((set, get) => ({
   },
   
   fetchSessions: async () => {
-    set({ loading: true, error: null });
+    const isRefresh = get().sessions.length > 0;
+    if (!isRefresh) {
+      set({ loading: true, error: null });
+    }
     try {
       const {
         selectedAgent,
@@ -94,23 +97,36 @@ export const useSessionStore = create((set, get) => ({
   },
   
   fetchTranscript: async (agent, filename) => {
-    set({ loading: true, error: null });
+    const { selectedSession } = get();
+    const isRefresh = selectedSession?.agent === agent && selectedSession?.filename === filename;
+
+    if (!isRefresh) {
+      set({ loading: true, error: null });
+    }
     try {
       const res = await fetch(`${API_URL}/api/sessions/${agent}/${filename}`);
       const data = await res.json();
-      
-      set({
+
+      const updates = {
         transcript: data.entries,
         sessionMeta: data.sessionMeta || null,
-        selectedSession: { agent, filename },
         loading: false,
         error: null,
-        // Reset transcript controls on new session
-        activeTypeFilters: [],
-        expandedTypes: ['thinking'],
-      });
+      };
+      // Only update selectedSession reference on new session to avoid triggering auto-scroll
+      if (!isRefresh) {
+        updates.selectedSession = { agent, filename };
+      }
+      // Only reset transcript controls on new session, not on refresh
+      if (!isRefresh) {
+        updates.activeTypeFilters = [];
+        updates.expandedTypes = ['thinking'];
+      }
+      set(updates);
     } catch (err) {
-      set({ error: err.message, loading: false, transcript: [], sessionMeta: null, selectedSession: null });
+      if (!isRefresh) {
+        set({ error: err.message, loading: false, transcript: [], sessionMeta: null, selectedSession: null });
+      }
     }
   },
   

@@ -32,10 +32,15 @@ function MainView() {
     sidebarOpen,
   } = useSessionStore();
 
-  // Initialize data
+  // Initialize data + poll every 2s
   useEffect(() => {
     fetchAgents();
     fetchStats();
+    const id = setInterval(() => {
+      fetchAgents();
+      fetchStats();
+    }, 2000);
+    return () => clearInterval(id);
   }, []);
 
   // Handle route agent change
@@ -45,20 +50,27 @@ function MainView() {
     }
   }, [routeAgent]);
 
-  // Fetch sessions when filters change
+  // Fetch sessions when filters change + poll every 2s
   useEffect(() => {
     fetchSessions();
+    const id = setInterval(fetchSessions, 2000);
+    return () => clearInterval(id);
   }, [selectedAgent, searchParams]);
 
-  // Handle route-based session selection
+  // Handle route-based session selection + poll transcript every 2s
   useEffect(() => {
     if (routeAgent && routeFilename) {
       const currentSelection = `${selectedSession?.agent}/${selectedSession?.filename}`;
       const routeSelection = `${routeAgent}/${routeFilename}`;
-      
+
       if (currentSelection !== routeSelection) {
         fetchTranscript(routeAgent, routeFilename);
       }
+
+      const id = setInterval(() => {
+        fetchTranscript(routeAgent, routeFilename);
+      }, 2000);
+      return () => clearInterval(id);
     }
   }, [routeAgent, routeFilename]);
 
