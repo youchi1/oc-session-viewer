@@ -89,14 +89,16 @@ function MessageBubble({ message, index, expandedTypes, activeTypeFilters, hideM
     const showThinking = isContentVisible('thinking');
     const showText = isContentVisible('assistant');
     const showTools = isContentVisible('tools');
+    const hasError = message.stopReason === 'error' && message.errorMessage;
 
     // If nothing to show, skip
-    const hasVisibleContent = 
+    const hasVisibleContent =
       (showThinking && thinkingParts.length > 0) ||
       (showText && textParts.length > 0) ||
       (showTools && toolCalls.length > 0) ||
+      hasError ||
       (message.model || message.usage); // always show metadata if it exists
-    
+
     if (!hasVisibleContent && activeTypeFilters.length > 0) return null;
 
     return (
@@ -120,6 +122,21 @@ function MessageBubble({ message, index, expandedTypes, activeTypeFilters, hideM
               </CollapsibleBlock>
             );
           })}
+
+          {/* Error message */}
+          {hasError && (
+            <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-red-400 text-sm font-medium">Error</span>
+                {message.stopReason && (
+                  <span className="text-xs text-red-400/60 font-mono">{message.stopReason}</span>
+                )}
+              </div>
+              <pre className="text-xs text-red-300 whitespace-pre-wrap break-all font-mono">
+                {message.errorMessage}
+              </pre>
+            </div>
+          )}
 
           {/* Text content */}
           {showText && textParts.map((text, idx) => (
