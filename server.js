@@ -688,6 +688,4 @@ app.get('*', (req, res) => {
 });
 
 const HOST = process.env.HOST || '0.0.0.0';
-app.listen(PORT, HOST, () => {
-  console.log(`✨ Session Viewer running at http://${HOST}:${PORT}`);
-});
+app.listen(PORT, HOST);
