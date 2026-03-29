@@ -30,6 +30,7 @@ function MainView() {
     selectedSession,
     setSelectedAgent,
     sidebarOpen,
+    error,
   } = useSessionStore();
 
   // Initialize data + poll every 2s
@@ -73,6 +74,13 @@ function MainView() {
       return () => clearInterval(id);
     }
   }, [routeAgent, routeFilename]);
+
+  // Redirect to main view if session not found
+  useEffect(() => {
+    if (routeAgent && routeFilename && error && !selectedSession) {
+      navigate('/');
+    }
+  }, [error, selectedSession, routeAgent, routeFilename]);
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-bg-primary flex">

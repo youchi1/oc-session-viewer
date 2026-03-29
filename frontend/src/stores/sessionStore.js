@@ -105,6 +105,7 @@ export const useSessionStore = create((set, get) => ({
     }
     try {
       const res = await fetch(`${API_URL}/api/sessions/${agent}/${filename}`);
+      if (!res.ok) throw new Error('Session not found');
       const data = await res.json();
 
       const updates = {
