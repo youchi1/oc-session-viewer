@@ -128,7 +128,9 @@ export const useSessionStore = create((set, get) => ({
       if (!isRefresh) {
         set({ error: err.message, loading: false, transcript: [], sessionMeta: null, selectedSession: null });
       }
+      return false;
     }
+    return true;
   },
   
   setSelectedAgent: (agent) => {
