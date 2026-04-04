@@ -45,8 +45,9 @@ function MainView() {
 
   // Handle route agent change
   useEffect(() => {
-    if (routeAgent && routeAgent !== selectedAgent) {
-      setSelectedAgent(routeAgent);
+    const agent = routeAgent || null;
+    if (agent !== selectedAgent) {
+      setSelectedAgent(agent);
     }
   }, [routeAgent]);
 
