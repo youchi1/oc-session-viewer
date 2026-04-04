@@ -1,3 +1,4 @@
+import { useRef, useEffect, useCallback } from 'react';
 import { useSessionStore } from '../stores/sessionStore';
 
 function FilterBar() {
@@ -14,8 +15,31 @@ function FilterBar() {
     clearSearch,
   } = useSessionStore();
 
+  const debounceRef = useRef(null);
+  const cancelDebounce = () => { if (debounceRef.current) { clearTimeout(debounceRef.current); debounceRef.current = null; } };
+
+  const debouncedSearch = useCallback(() => {
+    cancelDebounce();
+    debounceRef.current = setTimeout(() => {
+      const q = useSessionStore.getState().searchQuery;
+      if (q.trim().length >= 2) {
+        performSearch();
+      } else if (!q.trim()) {
+        clearSearch();
+      }
+    }, 300);
+  }, [performSearch, clearSearch]);
+
+  useEffect(() => cancelDebounce, []);
+
+  const handleChange = (e) => {
+    setSearchQuery(e.target.value);
+    debouncedSearch();
+  };
+
   const handleSearch = (e) => {
     e.preventDefault();
+    cancelDebounce();
     if (searchQuery.trim()) {
       performSearch();
     } else {
@@ -25,6 +49,7 @@ function FilterBar() {
 
   const handleKeyDown = (e) => {
     if (e.key === 'Escape') {
+      cancelDebounce();
       clearSearch();
     }
   };
@@ -40,9 +65,9 @@ function FilterBar() {
             <input
               type="text"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={handleChange}
               onKeyDown={handleKeyDown}
-              placeholder="Search all session content… (Enter to search)"
+              placeholder="Search all session content…"
               className={`w-full bg-bg-tertiary border rounded-lg px-4 py-2 pl-10 ${isSearchActive ? 'pr-10' : ''} text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 ${
                 isSearchActive 
                   ? 'border-accent/50 focus:border-accent focus:ring-accent' 

@@ -99,3 +99,13 @@ code, pre {
 button, a {
   transition: all 0.15s ease;
 }
+
+/* Search result scroll-to flash */
+.search-highlight-flash {
+  animation: highlight-flash 2s ease-out;
+}
+
+@keyframes highlight-flash {
+  0%, 15% { background-color: rgba(234, 179, 8, 0.15); border-color: rgba(234, 179, 8, 0.3); }
+  100% { background-color: transparent; border-color: transparent; }
+}

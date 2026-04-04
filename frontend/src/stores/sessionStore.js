@@ -26,9 +26,11 @@ export const useSessionStore = create((set, get) => ({
   // Search state
   searchResults: null,     // null = not searching; [] = no results
   searchLoading: false,
+  _searchAbort: null,
   
   // UI state
   sidebarOpen: true,
+  scrollToTarget: null, // { agent, filename, timestamp }
   
   // Transcript controls
   activeTypeFilters: [],   // empty = all visible; non-empty = only listed types visible
@@ -108,22 +110,24 @@ export const useSessionStore = create((set, get) => ({
       if (!res.ok) throw new Error('Session not found');
       const data = await res.json();
 
-      const updates = {
-        transcript: data.entries,
-        sessionMeta: data.sessionMeta || null,
-        loading: false,
-        error: null,
-      };
-      // Only update selectedSession reference on new session to avoid triggering auto-scroll
-      if (!isRefresh) {
-        updates.selectedSession = { agent, filename };
+      if (isRefresh) {
+        // Only update if data actually changed to avoid unnecessary re-renders
+        const { transcript: existing } = get();
+        if (existing.length !== data.entries.length ||
+            existing[existing.length - 1]?.timestamp !== data.entries[data.entries.length - 1]?.timestamp) {
+          set({ transcript: data.entries, sessionMeta: data.sessionMeta || null });
+        }
+      } else {
+        set({
+          transcript: data.entries,
+          sessionMeta: data.sessionMeta || null,
+          selectedSession: { agent, filename },
+          activeTypeFilters: [],
+          expandedTypes: ['thinking'],
+          loading: false,
+          error: null,
+        });
       }
-      // Only reset transcript controls on new session, not on refresh
-      if (!isRefresh) {
-        updates.activeTypeFilters = [];
-        updates.expandedTypes = ['thinking'];
-      }
-      set(updates);
     } catch (err) {
       if (!isRefresh) {
         set({ error: err.message, loading: false, transcript: [], sessionMeta: null, selectedSession: null });
@@ -146,23 +150,27 @@ export const useSessionStore = create((set, get) => ({
   },
   
   performSearch: async () => {
-    const { searchQuery, selectedAgent } = get();
+    const { searchQuery, selectedAgent, _searchAbort } = get();
     if (!searchQuery || searchQuery.trim().length < 2) {
       set({ searchResults: null });
       get().fetchSessions();
       return;
     }
-    
-    set({ searchLoading: true, searchResults: [] });
+
+    // Cancel any in-flight search
+    if (_searchAbort) _searchAbort.abort();
+    const abort = new AbortController();
+    set({ searchLoading: true, searchResults: [], _searchAbort: abort });
     try {
       const params = new URLSearchParams({ query: searchQuery.trim() });
       if (selectedAgent) params.set('agent', selectedAgent);
-      
-      const res = await fetch(`${API_URL}/api/search?${params}`);
+
+      const res = await fetch(`${API_URL}/api/search?${params}`, { signal: abort.signal });
       const data = await res.json();
-      set({ searchResults: data.results || [], searchLoading: false, error: null });
+      set({ searchResults: data.results || [], searchLoading: false, _searchAbort: null, error: null });
     } catch (err) {
-      set({ searchResults: [], searchLoading: false, error: err.message });
+      if (err.name === 'AbortError') return; // superseded by newer search
+      set({ searchResults: [], searchLoading: false, _searchAbort: null, error: err.message });
     }
   },
   

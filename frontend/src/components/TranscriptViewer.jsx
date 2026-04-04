@@ -21,6 +21,7 @@ function TranscriptViewer() {
     selectedAgent,
     activeTypeFilters,
     expandedTypes,
+    scrollToTarget,
     toggleTypeFilter,
     clearTypeFilters,
     toggleTypeExpand,
@@ -31,14 +32,37 @@ function TranscriptViewer() {
   const scrollRef = useRef(null);
   const [showScrollButtons, setShowScrollButtons] = useState(false);
 
-  // Auto-scroll to bottom when transcript loads
+  // Track which session we last auto-scrolled for, to avoid re-scrolling on polls
+  const lastScrolledSession = useRef(null);
+
   useEffect(() => {
-    if (scrollRef.current && transcript.length > 0) {
+    if (!scrollRef.current || transcript.length === 0) return;
+    const sessionKey = `${selectedSession?.agent}/${selectedSession?.filename}`;
+
+    if (scrollToTarget) {
+      const targetKey = `${scrollToTarget.agent}/${scrollToTarget.filename}`;
+      if (targetKey !== sessionKey) return; // wait for the right session to load
+
       requestAnimationFrame(() => {
-        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        const el = scrollRef.current?.querySelector(`[data-timestamp="${CSS.escape(scrollToTarget.timestamp)}"]`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          el.classList.add('search-highlight-flash');
+          setTimeout(() => el.classList.remove('search-highlight-flash'), 2000);
+          lastScrolledSession.current = sessionKey;
+          useSessionStore.setState({ scrollToTarget: null });
+        }
+        // If element not found (e.g. filtered out), keep scrollToTarget so it can retry
+      });
+    } else if (lastScrolledSession.current !== sessionKey) {
+      lastScrolledSession.current = sessionKey;
+      requestAnimationFrame(() => {
+        if (scrollRef.current) {
+          scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        }
       });
     }
-  }, [selectedSession]);
+  }, [selectedSession, scrollToTarget, transcript]);
 
   const handleScroll = useCallback(() => {
     if (scrollRef.current) {
@@ -133,7 +157,7 @@ function TranscriptViewer() {
 
   const sessionInfo = transcript.find(e => e.type === 'session');
   const firstMessage = transcript.find(e => e.type === 'message');
-  const lastMessage = [...transcript].reverse().find(e => e.type === 'message');
+  const lastMessage = transcript.findLast(e => e.type === 'message');
 
   return (
     <div className="h-full flex flex-col bg-bg-primary overflow-hidden relative">
@@ -280,7 +304,7 @@ function TranscriptViewer() {
                   const stepLabel = totalSteps > 1 ? `Step ${sIdx + 1}/${totalSteps}` : null;
 
                   return (
-                    <div key={sIdx} className="relative rounded-lg bg-white/[0.015] border border-white/[0.04]">
+                    <div key={sIdx} data-timestamp={timestamp || ''} className="relative rounded-lg bg-white/[0.015] border border-white/[0.04] transition-colors duration-500">
                       {/* Step accent bar */}
                       <div className="absolute left-0 top-2 bottom-2 w-[3px] rounded-full bg-indigo-500/40" />
 
@@ -337,7 +361,7 @@ function TranscriptViewer() {
           
           const { entry, globalIdx, kind } = group;
           return (
-            <div key={gIdx}>
+            <div key={gIdx} data-timestamp={entry.timestamp || ''} className="transition-colors duration-500">
               <EntryRenderer
                 entry={entry}
                 index={globalIdx}

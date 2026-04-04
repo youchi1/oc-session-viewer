@@ -57,6 +57,42 @@ async function getAgentFilenames(agent) {
   }
 }
 
+// Extract searchable segments from a message's content blocks
+function extractContentSegments(message) {
+  const content = message.content;
+  const segments = [];
+  if (Array.isArray(content)) {
+    for (const c of content) {
+      if (c.type === 'text' && c.text) {
+        segments.push({ type: 'text', text: c.text });
+      } else if (c.type === 'thinking' && c.thinking) {
+        segments.push({ type: 'thinking', text: c.thinking });
+      } else if (c.type === 'tool_use' || c.type === 'toolCall') {
+        const name = c.name || '';
+        const args = typeof c.input === 'string' ? c.input
+          : typeof c.arguments === 'string' ? c.arguments
+          : (c.input || c.arguments) ? JSON.stringify(c.input || c.arguments) : '';
+        if (name || args) {
+          segments.push({ type: 'tool_call', text: name + (args ? ' ' + args : '') });
+        }
+      } else if (c.type === 'tool_result' || c.type === 'toolResult') {
+        const resultText = typeof c.content === 'string' ? c.content
+          : Array.isArray(c.content) ? c.content.filter(r => r.type === 'text').map(r => r.text || '').join(' ')
+          : '';
+        if (resultText) {
+          segments.push({ type: 'tool_result', text: resultText });
+        }
+      }
+    }
+  } else if (typeof content === 'string') {
+    segments.push({ type: 'text', text: content });
+  }
+  if (message.errorMessage) {
+    segments.push({ type: 'error', text: message.errorMessage });
+  }
+  return segments;
+}
+
 // Get filenames WITH stat (for date sorting)
 async function getAgentFilesWithStat(agent) {
   const sessDir = join(AGENTS_DIR, agent, 'sessions');
@@ -740,33 +776,32 @@ app.get('/api/search', async (req, res) => {
               models.add(obj.message.model);
             }
             
-            // Extract searchable text
-            const content = obj.message.content;
-            let text = '';
-            if (Array.isArray(content)) {
-              text = content
-                .filter(c => c.type === 'text')
-                .map(c => c.text || '')
-                .join(' ');
-            } else if (typeof content === 'string') {
-              text = content;
+            // Extract firstUserMsg from text content only
+            if (role === 'user' && !firstUserMsg) {
+              const content = obj.message.content;
+              const text = Array.isArray(content) && content[0]?.type === 'text' ? content[0].text
+                : typeof content === 'string' ? content : '';
+              if (text) firstUserMsg = text.slice(0, 200);
             }
-            
-            if (role === 'user' && !firstUserMsg && text) {
-              firstUserMsg = text.slice(0, 200);
-            }
-            
-            // Check for match
-            if (text && text.toLowerCase().includes(q)) {
-              if (snippets.length < 3) {
-                const idx = text.toLowerCase().indexOf(q);
+
+            // Skip heavy segment extraction once we have enough snippets
+            // or when the raw line doesn't contain the query at all
+            if (snippets.length >= 3) continue;
+            if (!line.toLowerCase().includes(q)) continue;
+
+            const segments = extractContentSegments(obj.message);
+            for (const seg of segments) {
+              if (snippets.length >= 3) break;
+              const idx = seg.text.toLowerCase().indexOf(q);
+              if (idx !== -1) {
                 const start = Math.max(0, idx - 100);
-                const end = Math.min(text.length, idx + query.length + 100);
+                const end = Math.min(seg.text.length, idx + q.length + 100);
                 snippets.push({
                   role,
-                  text: (start > 0 ? '…' : '') + text.slice(start, end) + (end < text.length ? '…' : ''),
+                  sourceType: seg.type,
+                  text: (start > 0 ? '…' : '') + seg.text.slice(start, end) + (end < seg.text.length ? '…' : ''),
                   matchStart: idx - start + (start > 0 ? 1 : 0),
-                  matchLength: query.length,
+                  matchLength: q.length,
                   timestamp: obj.timestamp,
                 });
               }

@@ -17,7 +17,10 @@ function SessionList() {
     searchQuery,
   } = useSessionStore();
 
-  const handleSessionClick = (agent, filename) => {
+  const handleSessionClick = (agent, filename, timestamp) => {
+    useSessionStore.setState({
+      scrollToTarget: timestamp ? { agent, filename, timestamp } : null,
+    });
     navigate(`/session/${agent}/${filename}`);
   };
 
@@ -55,7 +58,7 @@ function SessionList() {
             {searchResults.map((result) => (
               <button
                 key={`${result.agent}-${result.filename}`}
-                onClick={() => handleSessionClick(result.agent || result.agentName, result.filename)}
+                onClick={() => handleSessionClick(result.agent || result.agentName, result.filename, null)}
                 className={`w-full text-left p-4 rounded-lg transition-all glass hover:glass-light ${
                   selectedSession?.filename === result.filename
                     ? 'ring-2 ring-accent bg-bg-tertiary'
@@ -79,15 +82,38 @@ function SessionList() {
                   </span>
                 </div>
 
-                {/* Snippets */}
+                {/* Snippets — each clickable to jump to that message */}
                 <div className="space-y-1.5 mb-2">
                   {result.snippets.map((snippet, idx) => (
-                    <div key={idx} className="text-xs rounded bg-black/20 border border-white/5 p-2">
-                      <span className={`inline-block mb-1 text-[10px] font-medium uppercase tracking-wider ${
-                        snippet.role === 'user' ? 'text-blue-400' : 'text-emerald-400'
-                      }`}>
-                        {snippet.role}
-                      </span>
+                    <div
+                      key={idx}
+                      role="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSessionClick(result.agent || result.agentName, result.filename, snippet.timestamp);
+                      }}
+                      className="text-xs rounded bg-black/20 border border-white/5 p-2 hover:bg-white/5 hover:border-white/10 transition-colors cursor-pointer"
+                    >
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <span className={`text-[10px] font-medium uppercase tracking-wider ${
+                          snippet.role === 'user' ? 'text-blue-400' : 'text-emerald-400'
+                        }`}>
+                          {snippet.role}
+                        </span>
+                        {snippet.sourceType && snippet.sourceType !== 'text' && (
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                            snippet.sourceType === 'thinking' ? 'bg-purple-500/20 text-purple-400' :
+                            snippet.sourceType === 'tool_call' ? 'bg-orange-500/20 text-orange-400' :
+                            snippet.sourceType === 'tool_result' ? 'bg-cyan-500/20 text-cyan-400' :
+                            snippet.sourceType === 'error' ? 'bg-red-500/20 text-red-400' :
+                            'bg-gray-500/20 text-gray-400'
+                          }`}>
+                            {snippet.sourceType === 'tool_call' ? 'tool call' :
+                             snippet.sourceType === 'tool_result' ? 'tool result' :
+                             snippet.sourceType}
+                          </span>
+                        )}
+                      </div>
                       <p className="text-gray-400 line-clamp-2 break-words">
                         <HighlightMatch text={snippet.text} query={searchQuery} />
                       </p>
