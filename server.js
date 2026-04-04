@@ -18,6 +18,7 @@ app.use(express.static(join(import.meta.dirname, 'frontend', 'dist')));
 // ─── Cache ─────────────────────────────────────────────────────
 const parseCache = new Map(); // filename → { summary, mtime }
 const MAX_CACHE_SIZE = 1000;
+const spawnMapCache = new Map(); // agent → { map, mtime }
 
 // Agent emoji map
 const AGENT_EMOJIS = {
@@ -219,6 +220,80 @@ async function parseSessionFile(agent, filename, existingStat = null) {
   return summary;
 }
 
+// Build parent↔child session map by scanning ALL JSONL files for sessions_spawn results.
+// The sessions_spawn tool result contains { childSessionKey } which is the exact key
+// in sessions.json for the child session — deterministic ID-based linking.
+//
+// Any file containing a sessions_spawn result IS the parent. The file's UUID is used
+// as the parent sessionId (it appears in the session list as that UUID).
+//
+// Returns { childToParent: Map<sessionId, parentSessionId>, parentToChildren: Map<sessionId, sessionId[]> }
+const EMPTY_SPAWN_MAP = { childToParent: new Map(), parentToChildren: new Map() };
+
+async function getSpawnMap(agent) {
+  const sessionsJsonPath = join(AGENTS_DIR, agent, 'sessions', 'sessions.json');
+
+  let fileStat;
+  try { fileStat = await stat(sessionsJsonPath); } catch { return EMPTY_SPAWN_MAP; }
+  const mtime = fileStat.mtime.getTime();
+
+  const cached = spawnMapCache.get(agent);
+  if (cached && cached.mtime === mtime) return cached.map;
+
+  const data = JSON.parse(await readFile(sessionsJsonPath, 'utf8'));
+
+  // Build childSessionKey → childSessionId lookup from sessions.json
+  const keyToSessionId = new Map();
+  for (const [key, val] of Object.entries(data)) {
+    if (val.sessionId) keyToSessionId.set(key, val.sessionId);
+  }
+
+  const childToParent = new Map();
+  const parentToChildren = new Map();
+  const sessDir = join(AGENTS_DIR, agent, 'sessions');
+
+  // Scan every JSONL file on disk for childSessionKey using streaming
+  const filenames = await getAgentFilenames(agent);
+
+  await Promise.all(filenames.map(async (filename) => {
+    const parentSid = parseSessionFilename(filename).sessionId;
+    if (!parentSid) return;
+
+    const filepath = join(sessDir, filename);
+    const rl = createInterface({ input: createReadStream(filepath), crlfDelay: Infinity });
+
+    try {
+      for await (const line of rl) {
+        if (!line.includes('childSessionKey')) continue;
+        try {
+          const obj = JSON.parse(line);
+          if (obj.type !== 'message') continue;
+          const content = obj.message?.content;
+          if (!Array.isArray(content)) continue;
+          for (const block of content) {
+            const text = block.text || (typeof block.content === 'string' ? block.content : '');
+            if (!text || !text.includes('childSessionKey')) continue;
+            try {
+              const result = JSON.parse(text);
+              const childKey = result.childSessionKey;
+              if (childKey && keyToSessionId.has(childKey)) {
+                const childSid = keyToSessionId.get(childKey);
+                childToParent.set(childSid, parentSid);
+                if (!parentToChildren.has(parentSid)) parentToChildren.set(parentSid, []);
+                parentToChildren.get(parentSid).push(childSid);
+              }
+            } catch {}
+          }
+        } catch {}
+      }
+    } catch { /* stream error */ }
+  }));
+
+  const map = { childToParent, parentToChildren };
+  spawnMapCache.set(agent, { map, mtime });
+  return map;
+}
+
 // ─── Routes ────────────────────────────────────────────────────
 
 app.get('/api/agents', async (req, res) => {
@@ -252,6 +327,53 @@ app.get('/api/agents', async (req, res) => {
   }
 });
 
+// Build spawn maps for the given agents (parallel)
+async function getSpawnMaps(agentNames) {
+  const results = await Promise.all(agentNames.map(async (ag) => [ag, await getSpawnMap(ag)]));
+  return new Map(results);
+}
+
+// Filter out child sessions from a file list (pre-pagination) so they don't take up page slots.
+// Returns the filtered list; children will be fetched on-demand when their parent is on the page.
+function removeChildFiles(allFiles, maps) {
+  return allFiles.filter(f => {
+    const map = maps.get(f.agent);
+    return !map || !map.childToParent.has(f.sessionId);
+  });
+}
+
+// After parsing a page of sessions, attach their children as nested objects
+async function attachChildren(sessions, maps) {
+  // Cache directory listings per agent to avoid repeated readdir calls
+  const dirCache = new Map();
+  async function getDirFiles(agentName) {
+    if (dirCache.has(agentName)) return dirCache.get(agentName);
+    const files = await getAgentFilenames(agentName);
+    dirCache.set(agentName, files);
+    return files;
+  }
+
+  await Promise.all(sessions.map(async (s) => {
+    const map = maps.get(s.agent);
+    if (!map) return;
+    const childIds = map.parentToChildren.get(s.sessionId);
+    if (!childIds || childIds.length === 0) return;
+
+    const dirFiles = await getDirFiles(s.agent);
+    const children = (await Promise.all(childIds.map(async (childSid) => {
+      const childFilename = dirFiles.find(f => f.startsWith(childSid));
+      if (!childFilename) return null;
+      try {
+        const child = await parseSessionFile(s.agent, childFilename);
+        if (child) child.parentSessionId = s.sessionId;
+        return child;
+      } catch { return null; }
+    }))).filter(Boolean);
+
+    if (children.length > 0) s.children = children;
+  }));
+}
+
 // List sessions - memory-efficient pagination with proper sorting
 app.get('/api/sessions', async (req, res) => {
   try {
@@ -264,7 +386,7 @@ app.get('/api/sessions', async (req, res) => {
       page = '1',
       limit = '50',
     } = req.query;
-    
+
     // Get agent list
     let agentNames = [];
     if (agent) {
@@ -297,11 +419,17 @@ app.get('/api/sessions', async (req, res) => {
       }
     }
     
+    // Build spawn maps for child filtering
+    const spawnMaps = await getSpawnMaps(agentNames);
+
     // Status filter (cheap, filename-based)
     if (status !== 'all') {
       allFiles = allFiles.filter(f => f.status === status);
     }
-    
+
+    // Remove child sessions so they don't occupy page slots
+    allFiles = removeChildFiles(allFiles, spawnMaps);
+
     // Sort
     switch (sort) {
       case 'date_asc':
@@ -324,12 +452,11 @@ app.get('/api/sessions', async (req, res) => {
         allFiles.sort((a, b) => b.filename.localeCompare(a.filename));
         break;
     }
-    
+
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
-    
+
     // When search or model filter is active, we must parse ALL files first
-    // so filtering works across the entire dataset, not just one page.
     if (search || model) {
       const allSessions = [];
       for (const f of allFiles) {
@@ -340,9 +467,9 @@ app.get('/api/sessions', async (req, res) => {
           console.error(`Failed to parse ${f.filename}:`, e.message);
         }
       }
-      
+
       let filtered = allSessions;
-      
+
       if (search) {
         const q = search.toLowerCase();
         filtered = filtered.filter(s =>
@@ -351,17 +478,18 @@ app.get('/api/sessions', async (req, res) => {
           s.filename.toLowerCase().includes(q)
         );
       }
-      
+
       if (model) {
-        filtered = filtered.filter(s => 
+        filtered = filtered.filter(s =>
           s.models && s.models.some(m => m.toLowerCase().includes(model.toLowerCase()))
         );
       }
-      
+
       const total = filtered.length;
       const offset = (pageNum - 1) * limitNum;
       const paged = filtered.slice(offset, offset + limitNum);
-      
+      await attachChildren(paged, spawnMaps);
+
       res.json({
         sessions: paged,
         total,
@@ -370,12 +498,12 @@ app.get('/api/sessions', async (req, res) => {
         totalPages: Math.ceil(total / limitNum),
       });
     } else {
-      // Fast path: no text filters, paginate first then parse only the page
+      // Fast path: paginate first then parse only the page
       const total = allFiles.length;
       const offset = (pageNum - 1) * limitNum;
       const pageFiles = allFiles.slice(offset, offset + limitNum);
       const sessions = [];
-      
+
       for (const f of pageFiles) {
         try {
           const summary = await parseSessionFile(f.agent, f.filename, f.size ? { size: f.size, mtime: f.mtime } : null);
@@ -384,7 +512,8 @@ app.get('/api/sessions', async (req, res) => {
           console.error(`Failed to parse ${f.filename}:`, e.message);
         }
       }
-      
+      await attachChildren(sessions, spawnMaps);
+
       res.json({
         sessions,
         total,

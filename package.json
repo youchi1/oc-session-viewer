@@ -5,7 +5,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "concurrently \"pnpm run dev:api\" \"pnpm run dev:fe\"",
-    "dev:api": "node server.js",
+    "dev:api": "node --watch server.js",
     "dev:fe": "pnpm --filter session-viewer-frontend dev",
     "build": "pnpm --filter session-viewer-frontend build"
   },

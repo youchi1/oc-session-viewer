@@ -166,76 +166,33 @@ function SessionList() {
       <div className="flex-1 overflow-y-auto">
         <div className="p-4 space-y-2">
           {sessions.map((session) => (
-            <button
-              key={`${session.agent}-${session.filename}`}
-              onClick={() => handleSessionClick(session.agent, session.filename)}
-              className={`w-full text-left p-4 rounded-lg transition-all glass hover:glass-light ${
-                selectedSession?.filename === session.filename
-                  ? 'ring-2 ring-accent bg-bg-tertiary'
-                  : ''
-              }`}
-            >
-              {/* Header */}
-              <div className="flex items-start justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-gray-300">
-                    {session.agent}
-                  </span>
-                  {session.topic && (
-                    <span className="text-xs bg-bg-quaternary px-2 py-0.5 rounded text-gray-400">
-                      Topic {session.topic}
-                    </span>
-                  )}
-                </div>
-                <StatusBadge status={session.status} />
-              </div>
+            <div key={`${session.agent}-${session.filename}`}>
+              {/* Parent session card */}
+              <SessionCard
+                session={session}
+                selectedSession={selectedSession}
+                onClick={handleSessionClick}
+              />
 
-              {/* Message Preview */}
-              <p className="text-sm text-gray-400 mb-3 line-clamp-2">
-                {truncate(session.firstUserMsg, 120)}
-              </p>
-
-              {/* Models */}
-              {session.models && session.models.length > 0 && (
-                <div className="flex flex-wrap gap-1 mb-2">
-                  {session.models.map((model, idx) => (
-                    <span
-                      key={idx}
-                      className={`text-xs px-2 py-0.5 rounded bg-${getModelColor(model)}-500/20 text-${getModelColor(model)}-400 border border-${getModelColor(model)}-500/30`}
-                    >
-                      {getModelShortName(model)}
-                    </span>
+              {/* Nested children */}
+              {session.children && session.children.length > 0 && (
+                <div className="ml-4 mt-1 space-y-1 border-l-2 border-accent/20 pl-0">
+                  {session.children.map((child) => (
+                    <div key={`${child.agent}-${child.filename}`} className="flex">
+                      <div className="w-3 h-px bg-accent/30 mt-5 flex-shrink-0"></div>
+                      <div className="flex-1">
+                        <SessionCard
+                          session={child}
+                          selectedSession={selectedSession}
+                          onClick={handleSessionClick}
+                          isChild
+                        />
+                      </div>
+                    </div>
                   ))}
                 </div>
               )}
-
-              {/* Stats */}
-              <div className="flex items-center gap-4 text-xs text-gray-500">
-                <span title="Messages">💬 {session.messageCount || 0}</span>
-                {session.toolCallCount > 0 && (
-                  <span title="Tool Calls">🔧 {session.toolCallCount}</span>
-                )}
-                {session.totalCost > 0 && (
-                  <span title="Cost" className="text-green-400">
-                    {formatCost(session.totalCost)}
-                  </span>
-                )}
-                <span title="Size">{formatBytes(session.size)}</span>
-              </div>
-
-              {/* Footer */}
-              <div className="flex items-center justify-between mt-2 pt-2 border-t border-white/5 text-xs text-gray-600">
-                <div className="flex items-center gap-2">
-                  <span className="text-gray-500" title={session.firstTimestamp ? `Created: ${new Date(session.firstTimestamp).toLocaleString()}` : 'Created'}>
-                    {formatDate(session.firstTimestamp || session.modifiedAt)}
-                  </span>
-                  <span className="text-gray-600" title="Last modified">
-                    · {formatRelativeTime(session.modifiedAt)}
-                  </span>
-                </div>
-                <span className="font-mono text-xs">{session.sessionId.slice(0, 8)}</span>
-              </div>
-            </button>
+            </div>
           ))}
         </div>
       </div>
@@ -271,6 +228,95 @@ function SessionList() {
         </div>
       )}
     </div>
+  );
+}
+
+function SessionCard({ session, selectedSession, onClick, isChild = false }) {
+  return (
+    <button
+      onClick={() => onClick(session.agent, session.filename)}
+      className={`w-full text-left p-4 rounded-lg transition-all glass hover:glass-light ${
+        selectedSession?.filename === session.filename
+          ? 'ring-2 ring-accent bg-bg-tertiary'
+          : ''
+      } ${isChild ? 'bg-white/[0.02] py-3' : ''}`}
+    >
+      {/* Header */}
+      <div className="flex items-start justify-between mb-2">
+        <div className="flex items-center gap-2">
+          {isChild && (
+            <span className="text-xs text-accent/60" title="Subagent session">
+              &#8627;
+            </span>
+          )}
+          <span className="text-sm font-medium text-gray-300">
+            {session.agent}
+          </span>
+          {isChild && (
+            <span className="text-[10px] bg-accent/10 text-accent/70 px-1.5 py-0.5 rounded border border-accent/20">
+              subagent
+            </span>
+          )}
+          {session.children && session.children.length > 0 && (
+            <span className="text-[10px] bg-accent/10 text-accent/70 px-1.5 py-0.5 rounded border border-accent/20">
+              +{session.children.length} spawned
+            </span>
+          )}
+          {session.topic && (
+            <span className="text-xs bg-bg-quaternary px-2 py-0.5 rounded text-gray-400">
+              Topic {session.topic}
+            </span>
+          )}
+        </div>
+        <StatusBadge status={session.status} />
+      </div>
+
+      {/* Message Preview */}
+      <p className="text-sm text-gray-400 mb-3 line-clamp-2">
+        {truncate(session.firstUserMsg, 120)}
+      </p>
+
+      {/* Models */}
+      {session.models && session.models.length > 0 && (
+        <div className="flex flex-wrap gap-1 mb-2">
+          {session.models.map((model, idx) => (
+            <span
+              key={idx}
+              className={`text-xs px-2 py-0.5 rounded bg-${getModelColor(model)}-500/20 text-${getModelColor(model)}-400 border border-${getModelColor(model)}-500/30`}
+            >
+              {getModelShortName(model)}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Stats */}
+      <div className="flex items-center gap-4 text-xs text-gray-500">
+        <span title="Messages">💬 {session.messageCount || 0}</span>
+        {session.toolCallCount > 0 && (
+          <span title="Tool Calls">🔧 {session.toolCallCount}</span>
+        )}
+        {session.totalCost > 0 && (
+          <span title="Cost" className="text-green-400">
+            {formatCost(session.totalCost)}
+          </span>
+        )}
+        <span title="Size">{formatBytes(session.size)}</span>
+      </div>
+
+      {/* Footer */}
+      <div className="flex items-center justify-between mt-2 pt-2 border-t border-white/5 text-xs text-gray-600">
+        <div className="flex items-center gap-2">
+          <span className="text-gray-500" title={session.firstTimestamp ? `Created: ${new Date(session.firstTimestamp).toLocaleString()}` : 'Created'}>
+            {formatDate(session.firstTimestamp || session.modifiedAt)}
+          </span>
+          <span className="text-gray-600" title="Last modified">
+            · {formatRelativeTime(session.modifiedAt)}
+          </span>
+        </div>
+        <span className="font-mono text-xs">{session.sessionId.slice(0, 8)}</span>
+      </div>
+    </button>
   );
 }
 
