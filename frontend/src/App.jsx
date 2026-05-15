@@ -43,13 +43,14 @@ function MainView() {
     return () => clearInterval(id);
   }, []);
 
-  // Handle route agent change
+  // Handle route agent change — but never let opening a session mutate the filter
   useEffect(() => {
+    if (routeFilename) return;
     const agent = routeAgent || null;
     if (agent !== selectedAgent) {
       setSelectedAgent(agent);
     }
-  }, [routeAgent]);
+  }, [routeAgent, routeFilename]);
 
   // Fetch sessions when filters change + poll every 2s
   useEffect(() => {
