@@ -28,6 +28,13 @@ const AGENT_EMOJIS = {
   'grey-worm': '🪖', sam: '📚',
 };
 
+// True for canonical session jsonl files, false for observability trajectories
+// (`*.trajectory.jsonl`) emitted alongside them.
+function isSessionFile(filename) {
+  if (filename.includes('.trajectory.jsonl')) return false;
+  return filename.endsWith('.jsonl') || filename.includes('.deleted.') || filename.includes('.reset.');
+}
+
 function parseSessionFilename(filename) {
   const isDeleted = filename.includes('.deleted.');
   const isReset = filename.includes('.reset.');
@@ -49,9 +56,7 @@ async function getAgentFilenames(agent) {
   const sessDir = join(AGENTS_DIR, agent, 'sessions');
   try {
     const files = await readdir(sessDir);
-    return files.filter(f => 
-      f.endsWith('.jsonl') || f.includes('.deleted.') || f.includes('.reset.')
-    );
+    return files.filter(isSessionFile);
   } catch {
     return [];
   }
@@ -98,9 +103,7 @@ async function getAgentFilesWithStat(agent) {
   const sessDir = join(AGENTS_DIR, agent, 'sessions');
   try {
     const files = await readdir(sessDir);
-    const sessionFiles = files.filter(f => 
-      f.endsWith('.jsonl') || f.includes('.deleted.') || f.includes('.reset.')
-    );
+    const sessionFiles = files.filter(isSessionFile);
     
     // Stat all files in parallel (fast, low memory)
     const entries = await Promise.all(sessionFiles.map(async (filename) => {
@@ -738,7 +741,7 @@ app.get('/api/search', async (req, res) => {
         continue;
       }
       
-      const sessionFiles = files.filter(f => f.endsWith('.jsonl') && !f.includes('.deleted.'));
+      const sessionFiles = files.filter(f => isSessionFile(f) && !f.includes('.deleted.'));
       
       for (const filename of sessionFiles) {
         if (results.length >= limitNum) break;
