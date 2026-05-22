@@ -9,6 +9,7 @@ const FILTER_TYPES = [
   { key: 'assistant', label: 'Assistant', icon: '💬', collapsible: false },
   { key: 'thinking', label: 'Thinking', icon: '💭', collapsible: true },
   { key: 'tools', label: 'Tools', icon: '🔧', collapsible: true },
+  { key: 'plugin', label: 'Plugins', icon: '🧩', collapsible: true },
   { key: 'system', label: 'System', icon: '⚙️', collapsible: false },
 ];
 
@@ -103,7 +104,10 @@ function TranscriptViewer() {
     return activeTypeFilters.includes(type);
   };
 
-  // Classify ALL entries first, then group into turns, then filter within groups
+  // Classify ALL entries first, then group into turns, then filter within groups.
+  // Note: openclaw writes the runtime-context `custom_message` *after* the user
+  // message it was injected for. We splice it in *before* the user message so it
+  // renders above the related bubble.
   const classifiedEntries = [];
   transcript.forEach((entry, globalIdx) => {
     if (entry.type === 'message') {
@@ -114,6 +118,14 @@ function TranscriptViewer() {
         classifiedEntries.push({ entry, globalIdx, kind: 'assistant' });
       } else if (role === 'toolResult') {
         classifiedEntries.push({ entry, globalIdx, kind: 'toolResult' });
+      }
+    } else if (entry.type === 'custom_message') {
+      const item = { entry, globalIdx, kind: 'plugin' };
+      const last = classifiedEntries[classifiedEntries.length - 1];
+      if (last && last.kind === 'user') {
+        classifiedEntries.splice(classifiedEntries.length - 1, 0, item);
+      } else {
+        classifiedEntries.push(item);
       }
     } else if (['session', 'model_change', 'thinking_level_change', 'compaction', 'custom'].includes(entry.type)) {
       classifiedEntries.push({ entry, globalIdx, kind: 'system' });
@@ -128,6 +140,7 @@ function TranscriptViewer() {
     const { kind, entry } = item;
     if (kind === 'user') return isTypeVisible('user');
     if (kind === 'toolResult') return isTypeVisible('tools');
+    if (kind === 'plugin') return isTypeVisible('plugin');
     if (kind === 'system') return isTypeVisible('system');
     if (kind === 'assistant') {
       const content = Array.isArray(entry.message?.content) ? entry.message.content : [];
@@ -619,7 +632,114 @@ function EntryRenderer({ entry, index, kind, expandedTypes, activeTypeFilters, h
     );
   }
 
+  // Plugin-injected runtime context (e.g. Hindsight memories injected before user turns)
+  if (entry.type === 'custom_message') {
+    return <RuntimeContextBlock entry={entry} defaultExpanded={expandedTypes.includes('plugin')} />;
+  }
+
   return null;
+}
+
+// Best-effort parser for plugin runtime-context payloads.
+// Generic shape: an optional <tag>...</tag> envelope (any tag name) followed by
+// arbitrary trailing text. Inside the tag we additionally surface `Current time`
+// and `- ` bullet items, which is the convention Hindsight uses today but works
+// for any future plugin that follows the same format.
+function parsePluginContent(content) {
+  if (typeof content !== 'string' || !content) {
+    return { tagName: null, inner: '', items: [], currentTime: null, extras: '' };
+  }
+  const tagMatch = content.match(/<([a-zA-Z][\w-]*)>([\s\S]*?)<\/\1>/);
+  if (!tagMatch) {
+    return { tagName: null, inner: content, items: [], currentTime: null, extras: '' };
+  }
+  const [full, tagName, inner] = tagMatch;
+  const extras = (content.slice(0, tagMatch.index) + content.slice(tagMatch.index + full.length)).trim();
+
+  let currentTime = null;
+  const items = [];
+  for (const rawLine of inner.split('\n')) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const timeMatch = line.match(/^Current time\s*-\s*(.+)$/);
+    if (timeMatch) { currentTime = timeMatch[1].trim(); continue; }
+    if (line.startsWith('- ')) items.push(line.slice(2).trim());
+  }
+  return { tagName, inner: inner.trim(), items, currentTime, extras };
+}
+
+function humanizeTag(tag) {
+  const s = tag.replace(/[_-]+/g, ' ');
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function RuntimeContextBlock({ entry, defaultExpanded = false }) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+  // Resync when the global Plugins-expand toggle flips
+  useEffect(() => { setExpanded(defaultExpanded); }, [defaultExpanded]);
+
+  const { tagName, inner, items, currentTime, extras } = parsePluginContent(entry.content);
+
+  const label = tagName ? humanizeTag(tagName) : 'Plugin context';
+  const itemNoun = tagName === 'hindsight_memories'
+    ? (items.length === 1 ? 'memory' : 'memories')
+    : (items.length === 1 ? 'item' : 'items');
+  const summary = items.length > 0
+    ? `${items.length} ${itemNoun}${currentTime ? ` · ${currentTime}` : ''}`
+    : (typeof entry.content === 'string' ? `${entry.content.length} chars` : '');
+
+  return (
+    <div className="flex justify-end animate-fade-in">
+      <div className="max-w-[80%] flex flex-col items-end">
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-violet-500/[0.06] border border-violet-500/20 hover:bg-violet-500/[0.10] hover:border-violet-500/30 transition-all text-left"
+          title={`Plugin-injected runtime context${entry.customType ? ` (${entry.customType})` : ''}`}
+        >
+          <span className="text-sm">🧩</span>
+          <span className="text-[11px] font-medium text-violet-300 whitespace-nowrap">{label}</span>
+          <span className="text-[10px] text-violet-400/60 truncate">{summary}</span>
+          {entry.timestamp && (
+            <span className="text-[10px] text-gray-500 font-mono tabular-nums whitespace-nowrap">
+              {formatTime(entry.timestamp)}
+            </span>
+          )}
+          <svg
+            className={`w-3 h-3 text-violet-400/60 transition-transform ${expanded ? 'rotate-180' : ''}`}
+            fill="none" stroke="currentColor" viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+
+        {expanded && (
+          <div className="mt-1 rounded-lg bg-bg-tertiary/40 border border-violet-500/15 p-3 text-[12px] text-gray-300 space-y-2">
+            {items.length > 0 ? (
+              <ul className="space-y-1.5 list-disc list-outside pl-5 marker:text-violet-400/60">
+                {items.map((m, i) => (
+                  <li key={i} className="leading-snug whitespace-pre-wrap break-words">{m}</li>
+                ))}
+              </ul>
+            ) : inner ? (
+              <pre className="whitespace-pre-wrap break-words font-mono text-[11px] text-gray-300">{inner}</pre>
+            ) : (
+              <div className="text-gray-500 italic">Empty payload.</div>
+            )}
+            {extras && (
+              <details className="mt-2">
+                <summary className="text-[10px] text-gray-500 cursor-pointer hover:text-gray-400 uppercase tracking-wider">
+                  Trailing metadata
+                </summary>
+                <pre className="mt-1 p-2 bg-bg-quaternary/40 rounded text-[10px] text-gray-400 font-mono whitespace-pre-wrap break-words overflow-x-auto">
+                  {extras}
+                </pre>
+              </details>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 // Group entries into turns, with steps inside each turn.
@@ -650,7 +770,7 @@ function groupIntoTurns(filteredEntries) {
 
   filteredEntries.forEach((item) => {
     const { kind } = item;
-    if (kind === 'user' || kind === 'system') {
+    if (kind === 'user' || kind === 'system' || kind === 'plugin') {
       flushTurn();
       groups.push(item);
     } else {
