@@ -189,6 +189,11 @@ function TranscriptViewer() {
                 Session ID: {sessionInfo.id || 'unknown'}
               </p>
             )}
+            {sessionMeta?.sessionKey && (
+              <p className="text-xs text-gray-500 font-mono">
+                Session key: {sessionMeta.sessionKey}
+              </p>
+            )}
             {firstMessage && lastMessage && (
               <p className="text-xs text-gray-500">
                 Duration: {formatDuration(firstMessage.timestamp, lastMessage.timestamp)}
